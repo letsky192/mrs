@@ -1,1 +1,1 @@
-# meta-rules-converter
+将 [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community) 的 dlc.dat 转换为 mrs 。

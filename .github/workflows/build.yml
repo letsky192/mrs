@@ -1,79 +1,55 @@
-name: Build
-
+name: Build rules dat files
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
+  schedule:
+    - cron: "0 1,4,7,10,13,22 * * *"
 
 jobs:
+  get_tag:
+    runs-on: ubuntu-latest
+
+    outputs:
+      local_tag: ${{ steps.get_local_tag.outputs.tag }}
+      upstream_tag: ${{ steps.get_upstream_tag.outputs.tag }}
+
+    steps:
+      - name: Get Local Tag
+        id: get_local_tag
+        run: |
+          LOCAL_LATEST_TAG=$(curl --retry 3 --retry-delay 6 'https://api.github.com/repos/letsky192/mrs/branches/release' | jq -r '.commit.commit.message')
+          echo "tag=$LOCAL_LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Get Upstream Tag
+        id: get_upstream_tag
+        run: |
+          UPSTREAM_LATEST_TAG=$(curl --retry 3 --retry-delay 6 'https://api.github.com/repos/v2fly/domain-list-community/branches/release' | jq -r '.commit.commit.message')
+          echo "tag=$UPSTREAM_LATEST_TAG" >> "$GITHUB_OUTPUT"
+
   build:
     runs-on: ubuntu-latest
-    
+    needs: get_tag
+    if: ${{ needs.get_tag.outputs.local_tag != needs.get_tag.outputs.upstream_tag }}
+
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "^1.20"
-          check-latest: true
-
-      - name: Cross Compile
+      - name: Get dlc.dat
         run: |
-          mkdir bin
-          GOOS=linux GOARCH=amd64 go build -o ./bin/converter-linux-amd64
-          GOOS=linux GOARCH=arm64 go build -o ./bin/converter-linux-arm64
-          GOOS=linux GOARCH=arm GOARM=7 go build -o ./bin/converter-linux-armv7
-          GOOS=darwin GOARCH=amd64 go build -o ./bin/converter-macos-amd64
-          GOOS=darwin GOARCH=arm64 go build -o ./bin/converter-macos-arm64
-          GOOS=windows GOARCH=amd64 go build -o ./bin/converter-windows-amd64.exe
-          GOOS=windows GOARCH=arm64 go build -o ./bin/converter-windows-arm64.exe
+          curl --retry 3 --retry-delay 6 'https://raw.githubusercontent.com/v2fly/domain-list-community/release/dlc.dat' -o dlc.dat
 
-      - uses: actions/upload-artifact@v4
-        if: ${{  success() }}
-        with:
-          name: artifact
-          path: bin/
-  
-  Upload-Prerelease:
-    permissions: write-all
-    if: ${{ github.ref_type == 'branch' && !startsWith(github.event_name, 'pull_request') }}
-    needs: [ build ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: artifact
-          path: bin/
+      - name: Convert geo to meta-rule-set
+        run: |
+          mkdir geosite2mrs
+          go run ./ geosite -f ./dlc.dat -o ./geosite2mrs
 
-      - name: Display structure of downloaded files
-        run: ls -R
-        working-directory: bin
-
-      - name: Delete current release assets
-        uses: 8Mi-Tech/delete-release-assets-action@main
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: Prerelease-${{ github.ref_name }}
-          deleteOnlyFromDrafts: false
-
-      - name: Tag Repo
-        uses: richardsimko/update-tag@v1
-        with:
-          tag_name: Prerelease-${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Prerelease
-        uses: softprops/action-gh-release@v1
-        if: ${{  success() }}
-        with:
-          tag_name: Prerelease-${{ github.ref_name }}
-          files: |
-            bin/*
-          prerelease: true
-          generate_release_notes: true
+      - name: Git push assets to "release" branch
+        run: |
+          cd geosite2mrs || exit 1
+          git init -b release
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "${{ needs.get_tag.outputs.upstream_tag }}"
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git push -f -u origin release
