@@ -1,0 +1,40 @@
+name: Compile converter
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v5
+        with:
+          ref: converter
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.20'
+          check-latest: true
+
+      - name: Cross compile
+        run: |
+          mkdir bin
+          GOOS=linux GOARCH=amd64 GOAMD64=v3 go build -o ./bin/converter-linux-amd64-v3
+          GOOS=windows GOARCH=amd64 GOAMD64=v3 go build -o ./bin/converter-windows-amd64-v3.exe
+
+      - name: Get version
+        run: |
+          LIB_VERSION=$(grep 'github.com/metacubex/mihomo ' go.mod | awk '{print $2}')
+          SOURCE_VERSION=$(curl --retry 3 --retry-delay 6 'https://api.github.com/repos/letsky192/mrs/branches/converter' | jq -r '.commit.html_url')
+          echo "lib_version=$LIB_VERSION" >> $GITHUB_ENV
+          echo "source_version=$SOURCE_VERSION" >> $GITHUB_ENV
+
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/*
+          name: 'converter ${{ env.lib_version }}'
+          tag_name: ${{ env.lib_version }}
+          body: ${{ env.source_version }}
+          target_commitish: converter
