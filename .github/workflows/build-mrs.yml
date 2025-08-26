@@ -1,0 +1,65 @@
+name: Build mihomo rule set
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1,4,7,10,13,22 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get local and upstream commit message
+        run: |
+          LOCAL_LATEST_TAG=$(curl -f --retry 3 --retry-delay 4 'https://api.github.com/repos/letsky192/mrs/branches/release' | jq -r '.commit.commit.message' | head -n 1)
+          UPSTREAM_LATEST_TAG=$(curl -f --retry 3 --retry-delay 4 'https://api.github.com/repos/v2fly/domain-list-community/branches/release' | jq -r '.commit.commit.message')
+          echo "local_tag=$LOCAL_LATEST_TAG" >> $GITHUB_ENV
+          echo "upstream_tag=$UPSTREAM_LATEST_TAG" >> $GITHUB_ENV
+
+      - name: Get converter
+        if: ${{ env.local_tag != env.upstream_tag }}
+        run: |
+          curl -f --retry 3 --retry-delay 4 -o convert -L 'https://github.com/letsky192/mrs/releases/latest/download/converter-linux-amd64-v3'
+          chmod u+x ./convert
+
+      - name: Get dlc.dat
+        if: ${{ env.local_tag != env.upstream_tag }}
+        run: |
+          curl -f --retry 3 --retry-delay 4 -o dlc.dat 'https://raw.githubusercontent.com/v2fly/domain-list-community/release/dlc.dat'
+          UPSTREAM_COMMIT_URL=$(curl -f --retry 3 --retry-delay 4 'https://api.github.com/repos/v2fly/domain-list-community/branches/master' | jq -r '.commit.html_url')
+          echo "upstream_commit_url=$UPSTREAM_COMMIT_URL" >> $GITHUB_ENV
+
+      - name: Build mihomo-rule-set
+        if: ${{ env.local_tag != env.upstream_tag }}
+        run: |
+          mkdir publish
+          ln -s /dev/null publish/classical
+          ./convert geosite -f dlc.dat -t clash -o publish | grep -v 'not a directory'
+          rm publish/classical
+
+      - name: Git push assets to "release" branch
+        if: ${{ env.local_tag != env.upstream_tag }}
+        run: |
+          cd publish
+          git init -b release
+          git config set user.name 'github-actions[bot]'
+          git config set user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m $'${{ env.upstream_tag }}\n\n${{ env.upstream_commit_url }}'
+          git remote add origin 'https://${{ github.actor }}:${{ github.token }}@github.com/${{ github.repository }}.git'
+          git push -f origin release:release
+
+      - name: Git push assets to mirror
+        if: ${{ env.local_tag != env.upstream_tag }}
+        run: |
+          cd publish
+          mkdir mrs text yaml
+          mv *.list text/
+          mv *.mrs mrs/
+          mv *.yaml yaml/
+          mv ../dlc.dat dlc.dat
+          git config set user.name '${{ secrets.mirror_author }}'
+          git config set user.email '${{ secrets.mirror_email }}'
+          git add -A
+          git commit --amend --reset-author -m $'${{ env.upstream_tag }}\n\n${{ env.upstream_commit_url }}'
+          git remote add mirror '${{ secrets.mirror_repo }}'
+          git push -f -q mirror release:geosite
