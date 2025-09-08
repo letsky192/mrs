@@ -1,0 +1,37 @@
+name: Compile converter
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v6
+        with:
+          ref: converter
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+          cache: false
+
+      - name: Cross compile
+        run: |
+          mkdir bin
+          GOOS=linux GOARCH=amd64 GOAMD64=v3 go build -o './bin/converter-linux-amd64-v3'
+          GOOS=windows GOARCH=amd64 GOAMD64=v3 go build -o './bin/converter-windows-amd64-v3.exe'
+
+      - name: Get converter version
+        run: |
+          MIHOMO_VERSION=$(grep 'github.com/metacubex/mihomo ' go.mod | awk '{print $2}')
+          echo "mihomo_version=$MIHOMO_VERSION" >> $GITHUB_ENV
+
+      - name: Upload release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: bin/*
+          commit: converter
+          name: converter ${{ env.mihomo_version }}
+          tag: ${{ env.mihomo_version }}
