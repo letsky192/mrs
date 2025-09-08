@@ -1,0 +1,78 @@
+name: Build mihomo rule set
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1,4,7,10,13,22 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get local and upstream commit message
+        run: |
+          LOCAL_SHA=$(curl -f --retry 3 --retry-delay 4 \
+                          --url 'https://api.github.com/repos/letsky192/mrs/branches/release' \
+                          -H 'Authorization: token ${{ github.token }}' \
+                      | jq -r '.commit.commit.message' | sed -n '3p' | cut -d '/' -f 7)
+          echo "local_sha=$LOCAL_SHA" >> $GITHUB_ENV
+          curl -f --retry 3 --retry-delay 4 -o upstream_info.json \
+              --url 'https://api.github.com/repos/v2fly/domain-list-community/branches/master' \
+              -H 'Authorization: token ${{ github.token }}'
+          UPSTREAM_SHA=$(jq -r '.commit.sha' upstream_info.json)
+          echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_ENV
+
+      - name: Get converter
+        if: ${{ env.local_sha != env.upstream_sha }}
+        run: |
+          curl -f --retry 3 --retry-delay 4 -o convert -L \
+              --url 'https://github.com/letsky192/mrs/releases/latest/download/converter-linux-amd64-v3'
+          chmod u+x ./convert
+
+      - name: Get dlc.dat
+        if: ${{ env.local_sha != env.upstream_sha }}
+        run: |
+          curl -f --retry 3 --retry-delay 4 -o dlc.dat \
+              --url 'https://raw.githubusercontent.com/v2fly/domain-list-community/release/dlc.dat'
+          author_date=$(jq -r '.commit.commit.author.date' upstream_info.json)
+          author_utc=$(date -d "${author_date:0:10} ${author_date:11:8}" +'%s')
+          author_cst=$(expr $author_utc + 28800)
+          author_cst=$(date -d "@$author_cst" +'%F %T UTC+8')
+          commit_msg="$author_cst\n\nhttps://github.com/v2fly/domain-list-community/commit/$upstream_sha"
+          echo "commit_msg=$commit_msg" >> $GITHUB_ENV
+
+      - name: Build mihomo-rule-set
+        if: ${{ env.local_sha != env.upstream_sha }}
+        run: |
+          mkdir publish
+          ln -s /dev/null publish/classical
+          ./convert geosite -f dlc.dat -t clash -o publish | grep -v 'not a directory'
+          rm publish/classical
+
+      - name: Git push assets to "release" branch
+        if: ${{ env.local_sha != env.upstream_sha }}
+        run: |
+          cd publish
+          git init -b release
+          git config set user.name 'github-actions[bot]'
+          git config set user.email 'github-actions[bot]@users.noreply.github.com'
+          echo '*.yaml' > .gitignore
+          echo '.gitignore' >> .gitignore
+          git add -A
+          echo -e "$commit_msg" | git commit -q -F -
+          git remote add origin 'https://${{ github.actor }}:${{ github.token }}@github.com/${{ github.repository }}.git'
+          git push -f origin release:release
+
+      - name: Git push assets to mirror
+        if: ${{ env.local_sha != env.upstream_sha }}
+        run: |
+          cd publish
+          mkdir mrs text
+          mv *.list text/
+          mv *.mrs mrs/
+          mv ../dlc.dat dlc.dat
+          git config set user.name '${{ secrets.mirror_author }}'
+          git config set user.email '${{ secrets.mirror_email }}'
+          git add -A
+          echo -e "$commit_msg" | git commit -q --amend --reset-author -F -
+          git remote add mirror '${{ secrets.mirror_repo }}'
+          git push -f -q mirror release:site > /dev/null 2>&1
