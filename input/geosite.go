@@ -35,7 +35,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 
 	var (
 		domains       = make(map[string][]string)
-		classical     = make(map[string][]string)
 		domainFull    = make(map[string][]string)
 		domainSuffix  = make(map[string][]string)
 		domainKeyword = make(map[string][]string)
@@ -57,7 +56,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 			marks := make(map[string][]*router.Domain)
 			var (
 				d []string
-				c []string
 				f []string
 				s []string
 				k []string
@@ -72,17 +70,13 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 				switch domain.Type {
 				case router.Domain_Full:
 					d = append(d, domain.Value)
-					c = append(c, "DOMAIN,"+domain.Value)
 					f = append(f, domain.Value)
 				case router.Domain_Domain:
 					d = append(d, "+."+domain.Value)
-					c = append(c, "DOMAIN-SUFFIX,"+domain.Value)
 					s = append(s, domain.Value)
 				case router.Domain_Regex:
-					c = append(c, "DOMAIN-REGEX,"+domain.Value)
 					r = append(r, domain.Value)
 				case router.Domain_Plain:
-					c = append(c, "DOMAIN-KEYWORD,"+domain.Value)
 					k = append(k, domain.Value)
 				}
 			}
@@ -90,7 +84,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 			switch outType {
 			case "clash":
 				domains[code] = d
-				classical[code] = c
 			case "sing-box":
 				domainFull[code] = f
 				domainSuffix[code] = s
@@ -102,7 +95,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 			for mark, markEntries := range marks {
 				var (
 					md []string
-					mc []string
 					mf []string
 					ms []string
 					mk []string
@@ -112,17 +104,13 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 					switch domain.Type {
 					case router.Domain_Full:
 						md = append(md, domain.Value)
-						mc = append(mc, "DOMAIN,"+domain.Value)
 						mf = append(mf, domain.Value)
 					case router.Domain_Domain:
 						md = append(md, "+."+domain.Value)
-						mc = append(mc, "DOMAIN-SUFFIX,"+domain.Value)
 						ms = append(ms, domain.Value)
 					case router.Domain_Regex:
-						mc = append(mc, "DOMAIN-REGEX,"+domain.Value)
 						mr = append(mr, domain.Value)
 					case router.Domain_Plain:
-						mc = append(mc, "DOMAIN-KEYWORD,"+domain.Value)
 						mk = append(mk, domain.Value)
 					}
 				}
@@ -130,7 +118,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 				switch outType {
 				case "clash":
 					domains[code+"@"+mark] = md
-					classical[code+"@"+mark] = mc
 				case "sing-box":
 					domainFull[code+"@"+mark] = mf
 					domainSuffix[code+"@"+mark] = ms
@@ -145,7 +132,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 
 	switch outType {
 	case "clash":
-		os.MkdirAll(outDir+"/classical", 0777)
 		for code, domain := range domains {
 			domainMap := map[string][]string{
 				"payload": domain,
@@ -167,23 +153,6 @@ func ConvertSite(cmd *cobra.Command, inPath string, outType string, outDir strin
 			if err != nil {
 				fmt.Println(code, " output err: ", err)
 			}
-			classicalMap := map[string][]string{
-				"payload": classical[code],
-			}
-			classicalOut, err := yaml.Marshal(&classicalMap)
-			if err != nil {
-				fmt.Println(code, " coding err: ", err)
-			}
-			err = os.WriteFile(outDir+"/classical/"+code+".yaml", classicalOut, 0666)
-			if err != nil {
-				fmt.Println(code, " output err: ", err)
-			}
-			classicalOut = []byte(strings.Join(classical[code], "\n"))
-			err = os.WriteFile(outDir+"/classical/"+code+".list", classicalOut, 0666)
-			if err != nil {
-				fmt.Println(code, " output err: ", err)
-			}
-			// meta.SaveMetaRuleSet(classicalOut, "classical", "text", outDir+"/classical/"+code+".mrs")
 		}
 	case "sing-box":
 		for code, domain := range domainFull {

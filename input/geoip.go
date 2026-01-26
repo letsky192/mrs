@@ -48,7 +48,6 @@ func ConvertIP(cmd *cobra.Command, inPath string, outType string, outDir string)
 		mutex sync.Mutex
 	)
 	countryCIDRs := make(map[string][]string)
-	classicalCIDRs := make(map[string][]string)
 
 	list := router.GeoIPList{}
 	err = proto.Unmarshal(data, &list)
@@ -60,21 +59,12 @@ func ConvertIP(cmd *cobra.Command, inPath string, outType string, outDir string)
 		go func(entry *router.GeoIP) {
 			defer wg.Done()
 			code := strings.ToLower(entry.CountryCode)
-			var (
-				results   []string
-				classical []string
-			)
+			var results []string
 			for _, cidr := range entry.Cidr {
 				results = append(results, fmt.Sprintf("%s/%d", net.IP(cidr.Ip).String(), cidr.Prefix))
-				if outType == "clash" {
-					classical = append(classical, fmt.Sprintf("IP-CIDR,%s/%d", net.IP(cidr.Ip).String(), cidr.Prefix))
-				}
 			}
 			mutex.Lock()
 			countryCIDRs[code] = results
-			if outType == "clash" {
-				classicalCIDRs[code] = classical
-			}
 			mutex.Unlock()
 		}(entry)
 	}
@@ -82,8 +72,6 @@ func ConvertIP(cmd *cobra.Command, inPath string, outType string, outDir string)
 
 	switch outType {
 	case "clash":
-		os.MkdirAll(outDir+"/classical", 0777)
-
 		for code, cidrs := range countryCIDRs {
 			ipcidrMap := map[string][]string{
 				"payload": cidrs,
@@ -105,25 +93,6 @@ func ConvertIP(cmd *cobra.Command, inPath string, outType string, outDir string)
 			if err != nil {
 				fmt.Println(code, " output err: ", err)
 			}
-		}
-		for code, cidrs := range classicalCIDRs {
-			classicalMap := map[string][]string{
-				"payload": cidrs,
-			}
-			classicalOut, err := yaml.Marshal(&classicalMap)
-			if err != nil {
-				fmt.Println(code, " coding err: ", err)
-			}
-			err = os.WriteFile(outDir+"/classical/"+code+".yaml", classicalOut, 0666)
-			if err != nil {
-				fmt.Println(code, " output err: ", err)
-			}
-			classicalOut = []byte(strings.Join(cidrs, "\n"))
-			err = os.WriteFile(outDir+"/classical/"+code+".list", classicalOut, 0666)
-			if err != nil {
-				fmt.Println(code, " output err: ", err)
-			}
-			// meta.SaveMetaRuleSet(classicalOut, "classical", "text", outDir+"/classical/"+code+".mrs")
 		}
 	case "sing-box":
 		for code, cidrs := range countryCIDRs {
